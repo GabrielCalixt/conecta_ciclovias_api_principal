@@ -247,12 +247,26 @@ docker compose up --build
 
 Dentro do compose, a principal encontra a secundária pelo nome do serviço (`SECUNDARIA_URL=http://secundaria:8000`). O banco SQLite fica no volume `banco_principal` e sobrevive quando o container é recriado. Para parar: `docker compose down` (e `docker compose down -v` para apagar o banco também).
 
-### Só a API principal
+### Sem compose: as duas APIs numa rede Docker
+
+Faz o mesmo que o compose, com comandos `docker` avulsos. As duas APIs entram numa rede Docker própria, e a principal encontra a secundária pelo **nome do container**. Rode na pasta da principal, com os repositórios lado a lado:
 
 ```bash
+docker network create conecta_ciclovias
+
+docker build -t conecta-ciclovias-secundaria ../conecta_ciclovias_api_secundaria
+docker run -d --rm --name secundaria --network conecta_ciclovias -p 8000:8000 conecta-ciclovias-secundaria
+
 docker build -t conecta-ciclovias-principal .
-docker run --rm -p 5000:5000 -e SECUNDARIA_URL=http://<endereço-da-secundária>:8000 conecta-ciclovias-principal
+docker run -d --rm --name principal --network conecta_ciclovias -p 5000:5000 -e SECUNDARIA_URL=http://secundaria:8000 -v banco_principal:/app/db conecta-ciclovias-principal
 ```
+
+- Principal: **http://localhost:5000/docs**
+- Secundária: **http://localhost:8000/docs**
+- `-v banco_principal:/app/db` guarda o banco num volume. Sem ele, o banco some quando o container para.
+- Para parar: `docker stop principal secundaria` (o `--rm` já remove os containers).
+
+Por que não apontar a principal para `localhost:8000`? Dentro do container, `localhost` é o próprio container, e não a sua máquina. Na rede Docker, os containers se enxergam pelo nome.
 
 ---
 
