@@ -2,7 +2,7 @@ import os
 
 import httpx
 
-# No Docker Compose vira http://secundaria:8000 (o nome do serviço no compose)
+# No Docker vira http://secundaria:8000 (nome do container na rede conecta_ciclovias; ver Dockerfile)
 SECUNDARIA_URL = os.getenv("SECUNDARIA_URL", "http://localhost:8000")
 SECUNDARIA_TIMEOUT = float(os.getenv("SECUNDARIA_TIMEOUT", "60"))
 

@@ -12,6 +12,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copia o restante do código (inclui dados/overpass, usados como fallback)
 COPY . .
 
+# Endereço da API secundária DENTRO da rede Docker "conecta_ciclovias":
+# os containers se encontram pelo nome (--name secundaria). Fora do Docker,
+# o padrão do código continua sendo http://localhost:8000.
+ENV SECUNDARIA_URL=http://secundaria:8000
+
 # Porta em que a API principal escuta
 EXPOSE 5000
 

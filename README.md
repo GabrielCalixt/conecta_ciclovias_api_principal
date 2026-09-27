@@ -11,23 +11,39 @@ Esta é a API **principal**: ela recebe o bairro, busca as ruas e ciclovias no O
 ---
 
 ## Arquitetura
-
 ```mermaid
-flowchart LR
-    cliente["Cliente (Swagger)<br/>informa um bairro"]
-    principal["API principal :5000<br/>FastAPI · orquestra, CRUD e histórico"]
+flowchart TB
+    cliente(["Cliente (Swagger)<br/>informa um bairro"])
+
+    subgraph c1["Container · porta 5000"]
+        principal["API principal<br/>FastAPI · orquestra, CRUD e histórico"]
+    end
+
+    subgraph c2["Container · porta 8000"]
+        secundaria["API secundária<br/>BFS + Dijkstra · sem estado"]
+    end
+
+    overpass("Overpass API<br/>externa · OpenStreetMap")
+    arquivos[("JSON salvos<br/>fallback da Overpass")]
     banco[("SQLite<br/>áreas e propostas")]
-    overpass["Overpass API (externa)<br/>ruas e ciclovias do OpenStreetMap"]
-    arquivos[("dados/overpass/*.json<br/>respostas salvas (fallback)")]
-    secundaria["API secundária :8000<br/>FastAPI · BFS + Dijkstra, sem estado"]
 
     cliente -- "REST/JSON" --> principal
-    principal -- "SQL (SQLAlchemy)" --> banco
-    principal -- "REST: POST /api/interpreter" --> overpass
-    principal -. "se a Overpass falhar" .-> arquivos
-    principal -- "REST/JSON: POST /analises" --> secundaria
-```
+    principal -- "HTTP/JSON" --> overpass
+    principal -- "REST/JSON" --> secundaria
+    principal -- "SQL" --> banco
+    overpass -. "se a Overpass falhar" .-> arquivos
 
+    classDef cli fill:#F4B942,stroke:#F4B942,color:#12372A
+    classDef api fill:#FFFFFF,stroke:#12372A,color:#12372A,stroke-width:2px
+    classDef ext fill:#FFFFFF,stroke:#12372A,color:#12372A
+    classDef dado fill:#FFFFFF,stroke:#5B6B64,color:#12372A,stroke-dasharray:4 3
+    class cliente cli
+    class principal,secundaria api
+    class overpass ext
+    class arquivos dado
+    classDef cont fill:#E3F4EC,stroke:#2F9E6E,stroke-dasharray:5 4,color:#2F9E6E
+    class c1,c2 cont
+```
 **Fluxo do `POST /areas`:**
 
 1. O cliente envia um bairro, por exemplo `{"bairro": "Botafogo"}`.
@@ -221,52 +237,52 @@ No Windows, o script `verificar.ps1` roda tudo em sequência e para no primeiro 
 
 ---
 
-## Execução com Docker
+## Execução com Docker (um container para cada API)
 
 Pré-requisito: [Docker](https://docs.docker.com/get-docker/) instalado e em execução.
 
-### As duas APIs juntas (recomendado): Docker Compose
+Cada API roda no **seu próprio container**. Os dois containers entram numa **rede Docker** chamada `conecta_ciclovias`, e a principal encontra a secundária pelo **nome do container** (`secundaria`).
 
-O `docker-compose.yml` fica na raiz deste repositório e constrói as duas APIs. Ele exige os **dois repositórios clonados lado a lado**, na mesma pasta:
-
-```
-pasta/
-├── conecta_ciclovias_api_principal/    <- rode o compose aqui
-└── conecta_ciclovias_api_secundaria/
-```
-
-```bash
-git clone https://github.com/GabrielCalixt/conecta_ciclovias_api_principal.git
-git clone https://github.com/GabrielCalixt/conecta_ciclovias_api_secundaria.git
-cd conecta_ciclovias_api_principal
-docker compose up --build
-```
-
-- Principal: **http://localhost:5000/docs**
-- Secundária: **http://localhost:8000/docs**
-
-Dentro do compose, a principal encontra a secundária pelo nome do serviço (`SECUNDARIA_URL=http://secundaria:8000`). O banco SQLite fica no volume `banco_principal` e sobrevive quando o container é recriado. Para parar: `docker compose down` (e `docker compose down -v` para apagar o banco também).
-
-### Sem compose: as duas APIs numa rede Docker
-
-Faz o mesmo que o compose, com comandos `docker` avulsos. As duas APIs entram numa rede Docker própria, e a principal encontra a secundária pelo **nome do container**. Rode na pasta da principal, com os repositórios lado a lado:
+**1. Suba a API secundária primeiro**, seguindo o [README dela](https://github.com/GabrielCalixt/conecta_ciclovias_api_secundaria#execução-com-docker). Em resumo, na pasta da secundária:
 
 ```bash
 docker network create conecta_ciclovias
-
-docker build -t conecta-ciclovias-secundaria ../conecta_ciclovias_api_secundaria
+docker build -t conecta-ciclovias-secundaria .
 docker run -d --rm --name secundaria --network conecta_ciclovias -p 8000:8000 conecta-ciclovias-secundaria
+```
 
+**2. Suba a API principal**, na pasta deste repositório:
+
+```bash
 docker build -t conecta-ciclovias-principal .
-docker run -d --rm --name principal --network conecta_ciclovias -p 5000:5000 -e SECUNDARIA_URL=http://secundaria:8000 -v banco_principal:/app/db conecta-ciclovias-principal
+docker run -d --rm --name principal --network conecta_ciclovias -p 5000:5000 -v banco_principal:/app/db conecta-ciclovias-principal
 ```
 
 - Principal: **http://localhost:5000/docs**
 - Secundária: **http://localhost:8000/docs**
-- `-v banco_principal:/app/db` guarda o banco num volume. Sem ele, o banco some quando o container para.
-- Para parar: `docker stop principal secundaria` (o `--rm` já remove os containers).
 
-Por que não apontar a principal para `localhost:8000`? Dentro do container, `localhost` é o próprio container, e não a sua máquina. Na rede Docker, os containers se enxergam pelo nome.
+O que cada opção faz:
+
+| Opção | Para quê |
+|---|---|
+| `--network conecta_ciclovias` | Coloca o container na mesma rede da secundária |
+| `--name principal` / `--name secundaria` | Nome do container. A principal chama a secundária em `http://secundaria:8000`, que é o valor de `SECUNDARIA_URL` definido no `Dockerfile` |
+| `-p 5000:5000` | Liga a porta 5000 do seu computador à porta 5000 do container |
+| `-v banco_principal:/app/db` | Guarda o banco SQLite num volume. Sem ele, o banco some quando o container para |
+| `-d` / `--rm` | Roda em segundo plano / remove o container quando ele for parado |
+
+**Comandos úteis:**
+
+```bash
+docker ps                          # containers rodando
+docker logs -f principal           # logs da principal (Ctrl+C para sair)
+docker stop principal secundaria   # para os dois
+docker volume rm banco_principal   # apaga o banco (com os containers parados)
+```
+
+- Se `docker network create` avisar que a rede **já existe**, é só seguir para o próximo comando.
+- Por que não apontar a principal para `localhost:8000`? Dentro do container, `localhost` é o **próprio container**, e não o seu computador. Na rede Docker, os containers se enxergam pelo nome.
+- Para rodar a principal num container e a secundária **fora** do Docker (com uvicorn), troque o endereço: `-e SECUNDARIA_URL=http://host.docker.internal:8000` (Docker Desktop no Windows e no Mac).
 
 ---
 
@@ -286,7 +302,6 @@ scripts/
 dados/overpass/     # respostas reais da Overpass (fallback e testes)
 tests/              # testes de conversão, banco e rotas (pytest)
 Dockerfile
-docker-compose.yml
 ```
 
 ---
